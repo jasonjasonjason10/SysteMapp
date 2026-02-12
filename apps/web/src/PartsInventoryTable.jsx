@@ -1,129 +1,81 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 
-const LS_KEY = "van_parts_inventory_v1";
-
-const CATEGORIES = [
-  "Batteries",
-  "Charge/Invert",
-  "Solar",
-  "Distribution",
-  "Fusing",
-  "Wire",
-  "Connectors/Lugs",
-  "Heatshrink/Loom",
-  "Switches/Controls",
-  "Monitoring",
-  "Mounting/Hardware",
-  "Tools",
-  "Other",
+const CONFIDENCE = [
+  { value: "confirmed", label: "✅ Confirmed" },
+  { value: "needs_confirmation", label: "⚠️ Needs confirm" },
+  { value: "tbd", label: "TBD" },
 ];
 
 const STATUS = [
-  { value: "need_to_buy", label: "Need to buy" },
-  { value: "ordered", label: "Ordered" },
-  { value: "received", label: "Received" },
-  { value: "installed", label: "Installed" },
+  { value: "planned", label: "Planned" },
+  { value: "in_progress", label: "In progress" },
+  { value: "done", label: "Done" },
+  { value: "issue", label: "Issue" },
 ];
 
-const DEFAULT_PARTS = [
-  {
-    partId: "P-001",
-    name: "Class-T fuse (350A)",
-    category: "Fusing",
-    brandModel: "TBD",
-    qtyNeeded: 1,
-    qtyOwned: 1,
-    qtyInstalled: 0,
-    status: "received",
-    usedInCircuits: "HC-001",
-    source: "",
-    notes: "Fuse shown. Holder not confirmed.",
-  },
-  {
-    partId: "P-002",
-    name: "2/0 battery cable (red/black)",
-    category: "Wire",
-    brandModel: "You own",
-    qtyNeeded: 40,
-    qtyOwned: 40,
-    qtyInstalled: 0,
-    status: "received",
-    usedInCircuits: "HC-001, HC-002, HC-003",
-    source: "",
-    notes: "Track actual cut lengths here as you install.",
-  },
+const COLUMNS = [
+  { key: "circuitId", label: "Circuit", w: "w-[140px]" },
+  { key: "fromTo", label: "From → To", w: "w-[320px]" },
+  { key: "wireType", label: "Wire type", w: "w-[180px]" },
+  { key: "gaugeOwned", label: "Gauge you own", w: "w-[210px]" },
+  { key: "protectionShown", label: "Protection shown", w: "w-[220px]" },
+  { key: "confidence", label: "✅/⚠️/TBD", w: "w-[180px]" },
+  { key: "status", label: "Status", w: "w-[160px]" },
 ];
 
-function safeParse(json) {
-  try {
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-}
-
-function uid(prefix = "P") {
+function uid(prefix = "HC") {
   const rand = Math.random().toString(16).slice(2, 8).toUpperCase();
   const time = Date.now().toString(16).slice(-4).toUpperCase();
   return `${prefix}-${time}${rand}`;
 }
 
-export default function PartsInventoryTable() {
-  const [parts, setParts] = useState(() => {
-    const saved = safeParse(localStorage.getItem(LS_KEY) || "");
-    return Array.isArray(saved) ? saved : DEFAULT_PARTS;
-  });
+function cx(...c) {
+  return c.filter(Boolean).join(" ");
+}
 
+export default function WiringRunsTable({ rows, setRows }) {
   const [query, setQuery] = useState("");
-  const [catFilter, setCatFilter] = useState("all");
+  const [confFilter, setConfFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [showMissing, setShowMissing] = useState(false);
+  const [onlyOpen, setOnlyOpen] = useState(false);
+
+  const [sortKey, setSortKey] = useState("circuitId");
+  const [sortDir, setSortDir] = useState("asc");
+  const [expanded, setExpanded] = useState(() => new Set());
+
   const importRef = useRef(null);
 
-  useEffect(() => {
-    localStorage.setItem(LS_KEY, JSON.stringify(parts));
-  }, [parts]);
-
   const stats = useMemo(() => {
-    const total = parts.length;
-    const needToBuy = parts.filter((p) => p.status === "need_to_buy").length;
-    const ordered = parts.filter((p) => p.status === "ordered").length;
-    const received = parts.filter((p) => p.status === "received").length;
-    const installed = parts.filter((p) => p.status === "installed").length;
-
-    // “missing” means qtyOwned < qtyNeeded
-    const missing = parts.filter(
-      (p) => Number(p.qtyOwned || 0) < Number(p.qtyNeeded || 0),
+    const total = rows.length;
+    const doneCount = rows.filter((r) => r.done).length;
+    const pct = total ? Math.round((doneCount / total) * 100) : 0;
+    const issues = rows.filter((r) => r.status === "issue").length;
+    const needs = rows.filter(
+      (r) => r.confidence === "needs_confirmation",
     ).length;
-
-    return { total, needToBuy, ordered, received, installed, missing };
-  }, [parts]);
+    const tbd = rows.filter((r) => r.confidence === "tbd").length;
+    return { total, doneCount, pct, issues, needs, tbd };
+  }, [rows]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    let list = [...parts];
+    let list = [...rows];
 
-    if (catFilter !== "all")
-      list = list.filter((p) => p.category === catFilter);
+    if (onlyOpen) list = list.filter((r) => !r.done);
+    if (confFilter !== "all")
+      list = list.filter((r) => r.confidence === confFilter);
     if (statusFilter !== "all")
-      list = list.filter((p) => p.status === statusFilter);
-
-    if (showMissing) {
-      list = list.filter(
-        (p) => Number(p.qtyOwned || 0) < Number(p.qtyNeeded || 0),
-      );
-    }
+      list = list.filter((r) => r.status === statusFilter);
 
     if (q) {
-      list = list.filter((p) => {
+      list = list.filter((r) => {
         const hay = [
-          p.partId,
-          p.name,
-          p.category,
-          p.brandModel,
-          p.usedInCircuits,
-          p.source,
-          p.notes,
+          r.circuitId,
+          r.fromTo,
+          r.wireType,
+          r.gaugeOwned,
+          r.protectionShown,
+          r.notes,
         ]
           .filter(Boolean)
           .join(" ")
@@ -132,146 +84,110 @@ export default function PartsInventoryTable() {
       });
     }
 
-    // simple sort: missing first, then name
     list.sort((a, b) => {
-      const am = Number(a.qtyOwned || 0) < Number(a.qtyNeeded || 0) ? 0 : 1;
-      const bm = Number(b.qtyOwned || 0) < Number(b.qtyNeeded || 0) ? 0 : 1;
-      if (am !== bm) return am - bm;
-      return String(a.name || "").localeCompare(String(b.name || ""));
+      const av = String(a?.[sortKey] ?? "").toLowerCase();
+      const bv = String(b?.[sortKey] ?? "").toLowerCase();
+      if (av < bv) return sortDir === "asc" ? -1 : 1;
+      if (av > bv) return sortDir === "asc" ? 1 : -1;
+      return 0;
     });
 
     return list;
-  }, [parts, query, catFilter, statusFilter, showMissing]);
+  }, [rows, query, confFilter, statusFilter, onlyOpen, sortKey, sortDir]);
 
-  function update(partId, key, value) {
-    setParts((prev) =>
-      prev.map((p) => (p.partId === partId ? { ...p, [key]: value } : p)),
+  function toggleSort(key) {
+    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  }
+
+  function updateRow(circuitId, key, value) {
+    setRows((prev) =>
+      prev.map((r) => (r.circuitId === circuitId ? { ...r, [key]: value } : r)),
     );
   }
 
-  function addPart() {
-    setParts((prev) => [
+  function addRow() {
+    setRows((prev) => [
       {
-        partId: uid("P"),
-        name: "",
-        category: "Other",
-        brandModel: "",
-        qtyNeeded: 0,
-        qtyOwned: 0,
-        qtyInstalled: 0,
-        status: "need_to_buy",
-        usedInCircuits: "",
-        source: "",
+        circuitId: uid("HC"),
+        fromTo: "",
+        wireType: "",
+        gaugeOwned: "",
+        protectionShown: "",
+        confidence: "tbd",
+        status: "planned",
+        done: false,
         notes: "",
       },
       ...prev,
     ]);
   }
 
-  function duplicate(partId) {
-    const found = parts.find((p) => p.partId === partId);
+  function duplicateRow(circuitId) {
+    const found = rows.find((r) => r.circuitId === circuitId);
     if (!found) return;
-    setParts((prev) => [{ ...found, partId: uid("P") }, ...prev]);
+    setRows((prev) => [
+      { ...found, circuitId: uid("HC"), done: false, status: "planned" },
+      ...prev,
+    ]);
   }
 
-  function remove(partId) {
-    setParts((prev) => prev.filter((p) => p.partId !== partId));
-  }
-
-  function exportJSON() {
-    const blob = new Blob([JSON.stringify(parts, null, 2)], {
-      type: "application/json",
+  function deleteRow(circuitId) {
+    setRows((prev) => prev.filter((r) => r.circuitId !== circuitId));
+    setExpanded((prev) => {
+      const n = new Set(prev);
+      n.delete(circuitId);
+      return n;
     });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "parts-inventory.json";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
   }
 
-  function onImportFile(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const parsed = safeParse(String(reader.result || ""));
-      if (!Array.isArray(parsed))
-        return alert("Import failed: JSON must be an array.");
-      setParts(parsed);
-    };
-    reader.readAsText(file);
-    e.target.value = "";
+  function toggleNotes(circuitId) {
+    setExpanded((prev) => {
+      const n = new Set(prev);
+      n.has(circuitId) ? n.delete(circuitId) : n.add(circuitId);
+      return n;
+    });
   }
 
-  function reset() {
-    if (!confirm("Reset parts inventory? This clears saved edits.")) return;
-    localStorage.removeItem(LS_KEY);
-    setParts(DEFAULT_PARTS);
-  }
+  // Local import/export buttons removed (global backup now), but we’ll keep a simple “paste import” later if you want.
+  // Leaving this hidden ref to show we can add per-module import later if needed.
+  void importRef;
 
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-lg font-semibold">Parts Inventory</h2>
+            <h2 className="text-lg font-semibold">Wiring Runs</h2>
             <div className="mt-2 flex flex-wrap gap-2 text-xs text-zinc-300">
               <span className="rounded-full border border-zinc-800 bg-zinc-950 px-3 py-1">
                 Total <b>{stats.total}</b>
               </span>
               <span className="rounded-full border border-zinc-800 bg-zinc-950 px-3 py-1">
-                Missing <b>{stats.missing}</b>
+                Done <b>{stats.doneCount}</b> ({stats.pct}%)
               </span>
               <span className="rounded-full border border-zinc-800 bg-zinc-950 px-3 py-1">
-                Need to buy <b>{stats.needToBuy}</b>
+                Issues <b>{stats.issues}</b>
               </span>
               <span className="rounded-full border border-zinc-800 bg-zinc-950 px-3 py-1">
-                Ordered <b>{stats.ordered}</b>
+                ⚠️ Needs confirm <b>{stats.needs}</b>
               </span>
               <span className="rounded-full border border-zinc-800 bg-zinc-950 px-3 py-1">
-                Received <b>{stats.received}</b>
-              </span>
-              <span className="rounded-full border border-zinc-800 bg-zinc-950 px-3 py-1">
-                Installed <b>{stats.installed}</b>
+                TBD <b>{stats.tbd}</b>
               </span>
             </div>
           </div>
 
           <div className="flex flex-wrap gap-2">
             <button
-              onClick={addPart}
+              onClick={addRow}
               className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm hover:bg-zinc-800/60"
             >
               + Add
             </button>
-            <button
-              onClick={exportJSON}
-              className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm hover:bg-zinc-800/60"
-            >
-              Export JSON
-            </button>
-            <button
-              onClick={() => importRef.current?.click()}
-              className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm hover:bg-zinc-800/60"
-            >
-              Import JSON
-            </button>
-            <button
-              onClick={reset}
-              className="rounded-xl border border-red-900/60 bg-red-950/30 px-3 py-2 text-sm hover:bg-red-950/60"
-            >
-              Reset
-            </button>
-            <input
-              ref={importRef}
-              type="file"
-              accept="application/json"
-              className="hidden"
-              onChange={onImportFile}
-            />
           </div>
         </div>
 
@@ -280,19 +196,19 @@ export default function PartsInventoryTable() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search parts (fuse, lug, mppt, 2/0, heatshrink...)"
+              placeholder="Search (battery, lynx, multiplus, gauge, fuse...)"
               className="w-full sm:w-[440px] rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-zinc-600"
             />
 
             <select
-              value={catFilter}
-              onChange={(e) => setCatFilter(e.target.value)}
-              className="w-full sm:w-[220px] rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-zinc-600"
+              value={confFilter}
+              onChange={(e) => setConfFilter(e.target.value)}
+              className="w-full sm:w-[200px] rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-zinc-600"
             >
-              <option value="all">All categories</option>
-              {CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
+              <option value="all">All confidence</option>
+              {CONFIDENCE.map((c) => (
+                <option key={c.value} value={c.value}>
+                  {c.label}
                 </option>
               ))}
             </select>
@@ -313,11 +229,11 @@ export default function PartsInventoryTable() {
             <label className="flex items-center gap-2 text-sm text-zinc-300">
               <input
                 type="checkbox"
-                checked={showMissing}
-                onChange={(e) => setShowMissing(e.target.checked)}
+                checked={onlyOpen}
+                onChange={(e) => setOnlyOpen(e.target.checked)}
                 className="h-4 w-4 accent-zinc-200"
               />
-              Show missing only
+              Only open
             </label>
           </div>
         </div>
@@ -328,188 +244,203 @@ export default function PartsInventoryTable() {
           <table className="min-w-[1400px] w-full border-separate border-spacing-0">
             <thead className="sticky top-0 z-10 bg-zinc-900">
               <tr>
-                <th className="w-[130px] border-b border-zinc-800 px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-300">
-                  Part ID
+                <th className="w-[70px] border-b border-zinc-800 px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-300">
+                  Done
                 </th>
-                <th className="w-[300px] border-b border-zinc-800 px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-300">
-                  Name
-                </th>
-                <th className="w-[220px] border-b border-zinc-800 px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-300">
-                  Category
-                </th>
-                <th className="w-[220px] border-b border-zinc-800 px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-300">
-                  Brand/Model
-                </th>
-                <th className="w-[120px] border-b border-zinc-800 px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-300">
-                  Needed
-                </th>
-                <th className="w-[120px] border-b border-zinc-800 px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-300">
-                  Owned
-                </th>
-                <th className="w-[120px] border-b border-zinc-800 px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-300">
-                  Installed
-                </th>
-                <th className="w-[180px] border-b border-zinc-800 px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-300">
-                  Status
-                </th>
-                <th className="w-[220px] border-b border-zinc-800 px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-300">
-                  Used in circuits
-                </th>
+                {COLUMNS.map((c) => (
+                  <th
+                    key={c.key}
+                    onClick={() => toggleSort(c.key)}
+                    className={cx(
+                      c.w,
+                      "border-b border-zinc-800 px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-300 cursor-pointer select-none hover:text-zinc-100",
+                    )}
+                  >
+                    {c.label}
+                    <span className="ml-2 text-zinc-500">
+                      {sortKey === c.key ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                    </span>
+                  </th>
+                ))}
                 <th className="w-[260px] border-b border-zinc-800 px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-300">
-                  Source/Link
-                </th>
-                <th className="w-[320px] border-b border-zinc-800 px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-300">
-                  Notes
-                </th>
-                <th className="w-[240px] border-b border-zinc-800 px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-300">
                   Actions
                 </th>
               </tr>
             </thead>
 
             <tbody>
-              {filtered.map((p) => {
-                const missing =
-                  Number(p.qtyOwned || 0) < Number(p.qtyNeeded || 0);
+              {filtered.map((r) => {
+                const isIssue = r.status === "issue";
+                const isDone = Boolean(r.done);
+
                 return (
-                  <tr key={p.partId} className={missing ? "bg-red-950/15" : ""}>
-                    <td className="border-b border-zinc-800 px-3 py-2 align-top">
-                      <input
-                        value={p.partId}
-                        onChange={(e) =>
-                          update(p.partId, "partId", e.target.value)
-                        }
-                        className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-2 text-sm outline-none focus:border-zinc-600"
-                      />
-                    </td>
-
-                    <td className="border-b border-zinc-800 px-3 py-2 align-top">
-                      <input
-                        value={p.name}
-                        onChange={(e) =>
-                          update(p.partId, "name", e.target.value)
-                        }
-                        className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-2 text-sm outline-none focus:border-zinc-600"
-                      />
-                    </td>
-
-                    <td className="border-b border-zinc-800 px-3 py-2 align-top">
-                      <select
-                        value={p.category}
-                        onChange={(e) =>
-                          update(p.partId, "category", e.target.value)
-                        }
-                        className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-2 text-sm outline-none focus:border-zinc-600"
-                      >
-                        {CATEGORIES.map((c) => (
-                          <option key={c} value={c}>
-                            {c}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-
-                    <td className="border-b border-zinc-800 px-3 py-2 align-top">
-                      <input
-                        value={p.brandModel}
-                        onChange={(e) =>
-                          update(p.partId, "brandModel", e.target.value)
-                        }
-                        className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-2 text-sm outline-none focus:border-zinc-600"
-                      />
-                    </td>
-
-                    {["qtyNeeded", "qtyOwned", "qtyInstalled"].map((k) => (
-                      <td
-                        key={k}
-                        className="border-b border-zinc-800 px-3 py-2 align-top"
-                      >
+                  <React.Fragment key={r.circuitId}>
+                    <tr
+                      className={cx(
+                        isDone && "bg-emerald-950/25",
+                        isIssue && "bg-red-950/20",
+                      )}
+                    >
+                      <td className="border-b border-zinc-800 px-3 py-2 align-top">
                         <input
-                          value={p[k]}
+                          type="checkbox"
+                          checked={isDone}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            updateRow(r.circuitId, "done", checked);
+                            if (checked)
+                              updateRow(r.circuitId, "status", "done");
+                            if (!checked && r.status === "done")
+                              updateRow(r.circuitId, "status", "planned");
+                          }}
+                          className="h-4 w-4 accent-zinc-200"
+                        />
+                      </td>
+
+                      <td className="border-b border-zinc-800 px-3 py-2 align-top">
+                        <input
+                          value={r.circuitId}
                           onChange={(e) =>
-                            update(
-                              p.partId,
-                              k,
-                              String(e.target.value).replace(/[^\d.]/g, ""),
+                            updateRow(r.circuitId, "circuitId", e.target.value)
+                          }
+                          className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-2 text-sm outline-none focus:border-zinc-600"
+                        />
+                      </td>
+
+                      <td className="border-b border-zinc-800 px-3 py-2 align-top">
+                        <input
+                          value={r.fromTo}
+                          onChange={(e) =>
+                            updateRow(r.circuitId, "fromTo", e.target.value)
+                          }
+                          className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-2 text-sm outline-none focus:border-zinc-600"
+                        />
+                      </td>
+
+                      <td className="border-b border-zinc-800 px-3 py-2 align-top">
+                        <input
+                          value={r.wireType}
+                          onChange={(e) =>
+                            updateRow(r.circuitId, "wireType", e.target.value)
+                          }
+                          className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-2 text-sm outline-none focus:border-zinc-600"
+                        />
+                      </td>
+
+                      <td className="border-b border-zinc-800 px-3 py-2 align-top">
+                        <input
+                          value={r.gaugeOwned}
+                          onChange={(e) =>
+                            updateRow(r.circuitId, "gaugeOwned", e.target.value)
+                          }
+                          className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-2 text-sm outline-none focus:border-zinc-600"
+                        />
+                      </td>
+
+                      <td className="border-b border-zinc-800 px-3 py-2 align-top">
+                        <input
+                          value={r.protectionShown}
+                          onChange={(e) =>
+                            updateRow(
+                              r.circuitId,
+                              "protectionShown",
+                              e.target.value,
                             )
                           }
                           className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-2 text-sm outline-none focus:border-zinc-600"
                         />
                       </td>
-                    ))}
 
-                    <td className="border-b border-zinc-800 px-3 py-2 align-top">
-                      <select
-                        value={p.status}
-                        onChange={(e) =>
-                          update(p.partId, "status", e.target.value)
-                        }
-                        className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-2 text-sm outline-none focus:border-zinc-600"
-                      >
-                        {STATUS.map((s) => (
-                          <option key={s.value} value={s.value}>
-                            {s.label}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-
-                    <td className="border-b border-zinc-800 px-3 py-2 align-top">
-                      <input
-                        value={p.usedInCircuits}
-                        onChange={(e) =>
-                          update(p.partId, "usedInCircuits", e.target.value)
-                        }
-                        placeholder="HC-001, HC-002..."
-                        className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-2 text-sm outline-none focus:border-zinc-600"
-                      />
-                    </td>
-
-                    <td className="border-b border-zinc-800 px-3 py-2 align-top">
-                      <input
-                        value={p.source}
-                        onChange={(e) =>
-                          update(p.partId, "source", e.target.value)
-                        }
-                        placeholder="Vendor / URL (optional)"
-                        className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-2 text-sm outline-none focus:border-zinc-600"
-                      />
-                    </td>
-
-                    <td className="border-b border-zinc-800 px-3 py-2 align-top">
-                      <input
-                        value={p.notes}
-                        onChange={(e) =>
-                          update(p.partId, "notes", e.target.value)
-                        }
-                        className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-2 text-sm outline-none focus:border-zinc-600"
-                      />
-                    </td>
-
-                    <td className="border-b border-zinc-800 px-3 py-2 align-top">
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          onClick={() => duplicate(p.partId)}
-                          className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm hover:bg-zinc-800/60"
+                      <td className="border-b border-zinc-800 px-3 py-2 align-top">
+                        <select
+                          value={r.confidence}
+                          onChange={(e) =>
+                            updateRow(r.circuitId, "confidence", e.target.value)
+                          }
+                          className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-2 text-sm outline-none focus:border-zinc-600"
                         >
-                          Duplicate
-                        </button>
-                        <button
-                          onClick={() => remove(p.partId)}
-                          className="rounded-xl border border-red-900/60 bg-red-950/30 px-3 py-2 text-sm hover:bg-red-950/60"
+                          {CONFIDENCE.map((c) => (
+                            <option key={c.value} value={c.value}>
+                              {c.label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+
+                      <td className="border-b border-zinc-800 px-3 py-2 align-top">
+                        <select
+                          value={r.status}
+                          onChange={(e) =>
+                            updateRow(r.circuitId, "status", e.target.value)
+                          }
+                          className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-2 text-sm outline-none focus:border-zinc-600"
                         >
-                          Delete
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                          {STATUS.map((s) => (
+                            <option key={s.value} value={s.value}>
+                              {s.label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+
+                      <td className="border-b border-zinc-800 px-3 py-2 align-top">
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() => toggleNotes(r.circuitId)}
+                            className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm hover:bg-zinc-800/60"
+                          >
+                            {expanded.has(r.circuitId) ? "Hide notes" : "Notes"}
+                          </button>
+                          <button
+                            onClick={() => duplicateRow(r.circuitId)}
+                            className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm hover:bg-zinc-800/60"
+                          >
+                            Duplicate
+                          </button>
+                          <button
+                            onClick={() => deleteRow(r.circuitId)}
+                            className="rounded-xl border border-red-900/60 bg-red-950/30 px-3 py-2 text-sm hover:bg-red-950/60"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+
+                    {expanded.has(r.circuitId) && (
+                      <tr className="bg-zinc-950/40">
+                        <td className="border-b border-zinc-800 px-3 py-2" />
+                        <td
+                          colSpan={COLUMNS.length + 1}
+                          className="border-b border-zinc-800 px-3 py-3"
+                        >
+                          <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3">
+                            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                              Notes for {r.circuitId}
+                            </div>
+                            <textarea
+                              value={r.notes || ""}
+                              onChange={(e) =>
+                                updateRow(r.circuitId, "notes", e.target.value)
+                              }
+                              className="w-full min-h-[96px] resize-y rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-zinc-600"
+                              placeholder="Fuse choice, routing plan, install notes, crimp notes, verify max draw, etc."
+                            />
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 );
               })}
 
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={12} className="px-3 py-6 text-sm text-zinc-400">
-                    No parts match.
+                  <td
+                    colSpan={COLUMNS.length + 2}
+                    className="px-3 py-6 text-sm text-zinc-400"
+                  >
+                    No rows match.
                   </td>
                 </tr>
               )}
@@ -519,7 +450,7 @@ export default function PartsInventoryTable() {
       </div>
 
       <p className="text-xs text-zinc-500">
-        “Missing” = Owned &lt; Needed (rows tint red). Export JSON for backups.
+        Auto-saves via global app state. Use Export Backup for daily snapshots.
       </p>
     </div>
   );

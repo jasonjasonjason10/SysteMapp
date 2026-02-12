@@ -1,6 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-
-const LS_KEY = "van_wiring_runs_v1";
+import React, { useMemo, useRef, useState } from "react";
 
 const CONFIDENCE = [
   { value: "confirmed", label: "✅ Confirmed" },
@@ -25,66 +23,7 @@ const COLUMNS = [
   { key: "status", label: "Status", w: "w-[160px]" },
 ];
 
-const DEFAULT_ROWS = [
-  {
-    circuitId: "HC-001",
-    fromTo: "Battery + → Class-T → Switch → Lynx",
-    wireType: "Battery cable",
-    gaugeOwned: "✅ 2/0 AWG (20’ red + 20’ black)",
-    protectionShown: "✅ 350A Class-T fuse (shown)",
-    confidence: "confirmed",
-    status: "planned",
-    done: false,
-    notes:
-      "Class-T holder not shown. Fuse value may be higher than necessary; verify MultiPlus DC requirements before changing.",
-  },
-  {
-    circuitId: "HC-002",
-    fromTo: "Battery − → SmartShunt → Main negative bus",
-    wireType: "Battery cable",
-    gaugeOwned: "✅ 2/0 AWG strongly preferred",
-    protectionShown: "✅ SmartShunt shown",
-    confidence: "confirmed",
-    status: "planned",
-    done: false,
-    notes:
-      "No fuse here. This must be the ONLY negative path from battery.",
-  },
-  {
-    circuitId: "HC-003",
-    fromTo: "Lynx fused output → MultiPlus DC + / −",
-    wireType: "Battery cable",
-    gaugeOwned: "✅ 2/0 AWG is what you own",
-    protectionShown: "Lynx fuse (type/value TBD)",
-    confidence: "needs_confirmation",
-    status: "planned",
-    done: false,
-    notes:
-      "Assign one Lynx fused position to MultiPlus. Need exact Lynx fuse you’ll install (not shown yet).",
-  },
-  {
-    circuitId: "HC-004",
-    fromTo: "Lynx → (MPPT / DC-DC / DC fuse block feed)",
-    wireType: "Battery cable",
-    gaugeOwned: "✅ 6 AWG available",
-    protectionShown: "Lynx fuses (TBD)",
-    confidence: "tbd",
-    status: "planned",
-    done: false,
-    notes:
-      "Decide which devices get Lynx protection vs external fusing once fuse inventory/holders are confirmed.",
-  },
-];
-
-function safeParse(json) {
-  try {
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-}
-
-function uid(prefix = "CIR") {
+function uid(prefix = "HC") {
   const rand = Math.random().toString(16).slice(2, 8).toUpperCase();
   const time = Date.now().toString(16).slice(-4).toUpperCase();
   return `${prefix}-${time}${rand}`;
@@ -94,12 +33,7 @@ function cx(...c) {
   return c.filter(Boolean).join(" ");
 }
 
-export default function WiringRunsTable() {
-  const [rows, setRows] = useState(() => {
-    const saved = safeParse(localStorage.getItem(LS_KEY) || "");
-    return Array.isArray(saved) ? saved : DEFAULT_ROWS;
-  });
-
+export default function WiringRunsTable({ rows, setRows }) {
   const [query, setQuery] = useState("");
   const [confFilter, setConfFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -111,16 +45,14 @@ export default function WiringRunsTable() {
 
   const importRef = useRef(null);
 
-  useEffect(() => {
-    localStorage.setItem(LS_KEY, JSON.stringify(rows));
-  }, [rows]);
-
   const stats = useMemo(() => {
     const total = rows.length;
     const doneCount = rows.filter((r) => r.done).length;
     const pct = total ? Math.round((doneCount / total) * 100) : 0;
     const issues = rows.filter((r) => r.status === "issue").length;
-    const needs = rows.filter((r) => r.confidence === "needs_confirmation").length;
+    const needs = rows.filter(
+      (r) => r.confidence === "needs_confirmation",
+    ).length;
     const tbd = rows.filter((r) => r.confidence === "tbd").length;
     return { total, doneCount, pct, issues, needs, tbd };
   }, [rows]);
@@ -130,8 +62,10 @@ export default function WiringRunsTable() {
     let list = [...rows];
 
     if (onlyOpen) list = list.filter((r) => !r.done);
-    if (confFilter !== "all") list = list.filter((r) => r.confidence === confFilter);
-    if (statusFilter !== "all") list = list.filter((r) => r.status === statusFilter);
+    if (confFilter !== "all")
+      list = list.filter((r) => r.confidence === confFilter);
+    if (statusFilter !== "all")
+      list = list.filter((r) => r.status === statusFilter);
 
     if (q) {
       list = list.filter((r) => {
@@ -171,7 +105,7 @@ export default function WiringRunsTable() {
 
   function updateRow(circuitId, key, value) {
     setRows((prev) =>
-      prev.map((r) => (r.circuitId === circuitId ? { ...r, [key]: value } : r))
+      prev.map((r) => (r.circuitId === circuitId ? { ...r, [key]: value } : r)),
     );
   }
 
@@ -218,38 +152,9 @@ export default function WiringRunsTable() {
     });
   }
 
-  function exportJSON() {
-    const blob = new Blob([JSON.stringify(rows, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "wiring-runs.json";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  }
-
-  function onImportFile(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const parsed = safeParse(String(reader.result || ""));
-      if (!Array.isArray(parsed)) return alert("Import failed: JSON must be an array.");
-      setRows(parsed);
-      setExpanded(new Set());
-    };
-    reader.readAsText(file);
-    e.target.value = "";
-  }
-
-  function reset() {
-    if (!confirm("Reset wiring runs? This clears saved edits.")) return;
-    localStorage.removeItem(LS_KEY);
-    setRows(DEFAULT_ROWS);
-    setExpanded(new Set());
-  }
+  // Local import/export buttons removed (global backup now), but we’ll keep a simple “paste import” later if you want.
+  // Leaving this hidden ref to show we can add per-module import later if needed.
+  void importRef;
 
   return (
     <div className="space-y-4">
@@ -277,19 +182,12 @@ export default function WiringRunsTable() {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <button onClick={addRow} className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm hover:bg-zinc-800/60">
+            <button
+              onClick={addRow}
+              className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm hover:bg-zinc-800/60"
+            >
               + Add
             </button>
-            <button onClick={exportJSON} className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm hover:bg-zinc-800/60">
-              Export JSON
-            </button>
-            <button onClick={() => importRef.current?.click()} className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm hover:bg-zinc-800/60">
-              Import JSON
-            </button>
-            <button onClick={reset} className="rounded-xl border border-red-900/60 bg-red-950/30 px-3 py-2 text-sm hover:bg-red-950/60">
-              Reset
-            </button>
-            <input ref={importRef} type="file" accept="application/json" className="hidden" onChange={onImportFile} />
           </div>
         </div>
 
@@ -298,7 +196,7 @@ export default function WiringRunsTable() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search (battery, lynx, multiplius, gauge, fuse...)"
+              placeholder="Search (battery, lynx, multiplus, gauge, fuse...)"
               className="w-full sm:w-[440px] rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-zinc-600"
             />
 
@@ -329,7 +227,12 @@ export default function WiringRunsTable() {
             </select>
 
             <label className="flex items-center gap-2 text-sm text-zinc-300">
-              <input type="checkbox" checked={onlyOpen} onChange={(e) => setOnlyOpen(e.target.checked)} className="h-4 w-4 accent-zinc-200" />
+              <input
+                type="checkbox"
+                checked={onlyOpen}
+                onChange={(e) => setOnlyOpen(e.target.checked)}
+                className="h-4 w-4 accent-zinc-200"
+              />
               Only open
             </label>
           </div>
@@ -350,7 +253,7 @@ export default function WiringRunsTable() {
                     onClick={() => toggleSort(c.key)}
                     className={cx(
                       c.w,
-                      "border-b border-zinc-800 px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-300 cursor-pointer select-none hover:text-zinc-100"
+                      "border-b border-zinc-800 px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-300 cursor-pointer select-none hover:text-zinc-100",
                     )}
                   >
                     {c.label}
@@ -372,7 +275,12 @@ export default function WiringRunsTable() {
 
                 return (
                   <React.Fragment key={r.circuitId}>
-                    <tr className={cx(isDone && "bg-emerald-950/25", isIssue && "bg-red-950/20")}>
+                    <tr
+                      className={cx(
+                        isDone && "bg-emerald-950/25",
+                        isIssue && "bg-red-950/20",
+                      )}
+                    >
                       <td className="border-b border-zinc-800 px-3 py-2 align-top">
                         <input
                           type="checkbox"
@@ -380,63 +288,75 @@ export default function WiringRunsTable() {
                           onChange={(e) => {
                             const checked = e.target.checked;
                             updateRow(r.circuitId, "done", checked);
-                            if (checked) updateRow(r.circuitId, "status", "done");
-                            if (!checked && r.status === "done") updateRow(r.circuitId, "status", "planned");
+                            if (checked)
+                              updateRow(r.circuitId, "status", "done");
+                            if (!checked && r.status === "done")
+                              updateRow(r.circuitId, "status", "planned");
                           }}
                           className="h-4 w-4 accent-zinc-200"
                         />
                       </td>
 
-                      {/* circuitId */}
                       <td className="border-b border-zinc-800 px-3 py-2 align-top">
                         <input
                           value={r.circuitId}
-                          onChange={(e) => updateRow(r.circuitId, "circuitId", e.target.value)}
+                          onChange={(e) =>
+                            updateRow(r.circuitId, "circuitId", e.target.value)
+                          }
                           className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-2 text-sm outline-none focus:border-zinc-600"
                         />
                       </td>
 
-                      {/* fromTo */}
                       <td className="border-b border-zinc-800 px-3 py-2 align-top">
                         <input
                           value={r.fromTo}
-                          onChange={(e) => updateRow(r.circuitId, "fromTo", e.target.value)}
+                          onChange={(e) =>
+                            updateRow(r.circuitId, "fromTo", e.target.value)
+                          }
                           className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-2 text-sm outline-none focus:border-zinc-600"
                         />
                       </td>
 
-                      {/* wireType */}
                       <td className="border-b border-zinc-800 px-3 py-2 align-top">
                         <input
                           value={r.wireType}
-                          onChange={(e) => updateRow(r.circuitId, "wireType", e.target.value)}
+                          onChange={(e) =>
+                            updateRow(r.circuitId, "wireType", e.target.value)
+                          }
                           className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-2 text-sm outline-none focus:border-zinc-600"
                         />
                       </td>
 
-                      {/* gaugeOwned */}
                       <td className="border-b border-zinc-800 px-3 py-2 align-top">
                         <input
                           value={r.gaugeOwned}
-                          onChange={(e) => updateRow(r.circuitId, "gaugeOwned", e.target.value)}
+                          onChange={(e) =>
+                            updateRow(r.circuitId, "gaugeOwned", e.target.value)
+                          }
                           className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-2 text-sm outline-none focus:border-zinc-600"
                         />
                       </td>
 
-                      {/* protectionShown */}
                       <td className="border-b border-zinc-800 px-3 py-2 align-top">
                         <input
                           value={r.protectionShown}
-                          onChange={(e) => updateRow(r.circuitId, "protectionShown", e.target.value)}
+                          onChange={(e) =>
+                            updateRow(
+                              r.circuitId,
+                              "protectionShown",
+                              e.target.value,
+                            )
+                          }
                           className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-2 text-sm outline-none focus:border-zinc-600"
                         />
                       </td>
 
-                      {/* confidence */}
                       <td className="border-b border-zinc-800 px-3 py-2 align-top">
                         <select
                           value={r.confidence}
-                          onChange={(e) => updateRow(r.circuitId, "confidence", e.target.value)}
+                          onChange={(e) =>
+                            updateRow(r.circuitId, "confidence", e.target.value)
+                          }
                           className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-2 text-sm outline-none focus:border-zinc-600"
                         >
                           {CONFIDENCE.map((c) => (
@@ -447,11 +367,12 @@ export default function WiringRunsTable() {
                         </select>
                       </td>
 
-                      {/* status */}
                       <td className="border-b border-zinc-800 px-3 py-2 align-top">
                         <select
                           value={r.status}
-                          onChange={(e) => updateRow(r.circuitId, "status", e.target.value)}
+                          onChange={(e) =>
+                            updateRow(r.circuitId, "status", e.target.value)
+                          }
                           className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-2 text-sm outline-none focus:border-zinc-600"
                         >
                           {STATUS.map((s) => (
@@ -462,16 +383,24 @@ export default function WiringRunsTable() {
                         </select>
                       </td>
 
-                      {/* actions */}
                       <td className="border-b border-zinc-800 px-3 py-2 align-top">
                         <div className="flex flex-wrap gap-2">
-                          <button onClick={() => toggleNotes(r.circuitId)} className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm hover:bg-zinc-800/60">
+                          <button
+                            onClick={() => toggleNotes(r.circuitId)}
+                            className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm hover:bg-zinc-800/60"
+                          >
                             {expanded.has(r.circuitId) ? "Hide notes" : "Notes"}
                           </button>
-                          <button onClick={() => duplicateRow(r.circuitId)} className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm hover:bg-zinc-800/60">
+                          <button
+                            onClick={() => duplicateRow(r.circuitId)}
+                            className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm hover:bg-zinc-800/60"
+                          >
                             Duplicate
                           </button>
-                          <button onClick={() => deleteRow(r.circuitId)} className="rounded-xl border border-red-900/60 bg-red-950/30 px-3 py-2 text-sm hover:bg-red-950/60">
+                          <button
+                            onClick={() => deleteRow(r.circuitId)}
+                            className="rounded-xl border border-red-900/60 bg-red-950/30 px-3 py-2 text-sm hover:bg-red-950/60"
+                          >
                             Delete
                           </button>
                         </div>
@@ -481,16 +410,21 @@ export default function WiringRunsTable() {
                     {expanded.has(r.circuitId) && (
                       <tr className="bg-zinc-950/40">
                         <td className="border-b border-zinc-800 px-3 py-2" />
-                        <td colSpan={COLUMNS.length + 1} className="border-b border-zinc-800 px-3 py-3">
+                        <td
+                          colSpan={COLUMNS.length + 1}
+                          className="border-b border-zinc-800 px-3 py-3"
+                        >
                           <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3">
                             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">
                               Notes for {r.circuitId}
                             </div>
                             <textarea
                               value={r.notes || ""}
-                              onChange={(e) => updateRow(r.circuitId, "notes", e.target.value)}
+                              onChange={(e) =>
+                                updateRow(r.circuitId, "notes", e.target.value)
+                              }
                               className="w-full min-h-[96px] resize-y rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-zinc-600"
-                              placeholder="Fuse choice, routing plan, install notes, crimp notes, 'verify DC max draw', etc."
+                              placeholder="Fuse choice, routing plan, install notes, crimp notes, verify max draw, etc."
                             />
                           </div>
                         </td>
@@ -502,7 +436,10 @@ export default function WiringRunsTable() {
 
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={COLUMNS.length + 2} className="px-3 py-6 text-sm text-zinc-400">
+                  <td
+                    colSpan={COLUMNS.length + 2}
+                    className="px-3 py-6 text-sm text-zinc-400"
+                  >
                     No rows match.
                   </td>
                 </tr>
@@ -513,7 +450,7 @@ export default function WiringRunsTable() {
       </div>
 
       <p className="text-xs text-zinc-500">
-        Auto-saves locally. Export JSON to back up or move to another computer.
+        Auto-saves via global app state. Use Export Backup for daily snapshots.
       </p>
     </div>
   );

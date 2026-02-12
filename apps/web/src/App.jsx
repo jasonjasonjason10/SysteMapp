@@ -1,58 +1,107 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import WiringRunsTable from "./WiringRunsTable.jsx";
 import PartsInventoryTable from "./PartsInventoryTable.jsx";
+import Guides from "./Guides.jsx";
+import Phases from "./Phases.jsx";
 
-const LS_KEY = "van-wiring-tracker:v1";
-
-// You can keep your existing seed; leaving tiny placeholder here.
-// If you already pasted my seed earlier, KEEP YOURS and delete this.
-const seed = {
-  wiringRuns: [],
-  parts: [],
-};
-
-function loadState() {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
+import {
+  EMPTY_STATE,
+  loadOps,
+  saveOps,
+  downloadJSON,
+  safeParse,
+  validateOpsShape,
+} from "./utils/storage.js";
 
 const NAV = [
   { key: "wiring", label: "Wiring Runs", sub: "Master run list + progress" },
   { key: "parts", label: "Parts Inventory", sub: "Everything you own / need" },
-  // Later:
-  // { key: "components", label: "Components", sub: "MPPT, Lynx, Orion, etc." },
-  // { key: "connectors", label: "Connectors", sub: "Lugs, MC4, taps, etc." },
+  {
+    key: "guides",
+    label: "Installation Guides",
+    sub: "Manuals + checklists (folder library)",
+  },
+  {
+    key: "phases",
+    label: "Build Phases",
+    sub: "Editable phases + tasks + dates",
+  },
 ];
 
+function todayStamp() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 export default function App() {
-  const saved = useMemo(() => loadState(), []);
   const [active, setActive] = useState("wiring");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
-  const [wiringRuns, setWiringRuns] = useState(saved?.wiringRuns ?? seed.wiringRuns);
-  const [parts, setParts] = useState(saved?.parts ?? seed.parts);
+  const [ops, setOps] = useState(() => loadOps() ?? EMPTY_STATE);
 
+  // Global autosave (entire ops system)
   useEffect(() => {
-    localStorage.setItem(LS_KEY, JSON.stringify({ wiringRuns, parts }));
-  }, [wiringRuns, parts]);
+    saveOps(ops);
+  }, [ops]);
 
-  const wiringStats = useMemo(() => {
-    const total = wiringRuns.length;
-    const done = wiringRuns.filter((r) => r.done).length;
-    const needs = wiringRuns.filter((r) => r.confidence === "Needs confirm").length;
-    const tbd = wiringRuns.filter((r) => r.confidence === "TBD").length;
-    return { total, done, needs, tbd };
-  }, [wiringRuns]);
+  // Global export/import
+  const importRef = useRef(null);
+
+  function exportBackup() {
+    downloadJSON(`van-build-ops-backup-${todayStamp()}.json`, ops);
+  }
+
+  function onImportBackupFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const parsed = safeParse(String(reader.result || ""));
+      if (!validateOpsShape(parsed)) {
+        alert(
+          "Import failed: file does not look like a Van Build Ops backup JSON.",
+        );
+        return;
+      }
+      const ok = confirm(
+        "Import backup and replace current data?\n\nTip: Export a backup first if you want a restore point.",
+      );
+      if (!ok) return;
+      setOps(parsed);
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  }
+
+  function resetAll() {
+    const ok = confirm(
+      "Reset the ENTIRE Ops System? This clears all saved data.",
+    );
+    if (!ok) return;
+    setOps(EMPTY_STATE);
+  }
 
   const current = NAV.find((n) => n.key === active);
 
+  // Wiring stats (only relevant on wiring tab, but fine to show globally)
+  const wiringStats = useMemo(() => {
+    const rows = ops.wiringRuns || [];
+    const total = rows.length;
+    const done = rows.filter((r) => r.done).length;
+    const needs = rows.filter(
+      (r) => r.confidence === "needs_confirmation",
+    ).length;
+    const tbd = rows.filter((r) => r.confidence === "tbd").length;
+    const issues = rows.filter((r) => r.status === "issue").length;
+    return { total, done, needs, tbd, issues };
+  }, [ops.wiringRuns]);
+
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100">
+    <div className="min-h-screen text-zinc-100">
       {/* background glow */}
       <div className="pointer-events-none fixed inset-0 -z-10">
         <div className="absolute left-1/2 top-[-20%] h-[520px] w-[520px] -translate-x-1/2 rounded-full bg-cyan-500/10 blur-3xl" />
@@ -71,7 +120,9 @@ export default function App() {
           </button>
 
           <div className="text-center">
-            <div className="text-sm font-semibold leading-tight">Van Wiring Tracker</div>
+            <div className="text-sm font-semibold leading-tight">
+              Van Build Ops
+            </div>
             <div className="text-xs text-zinc-400">{current?.label}</div>
           </div>
 
@@ -82,14 +133,14 @@ export default function App() {
       {/* Layout */}
       <div className="mx-auto flex max-w-7xl gap-6 px-4 py-5 md:px-6 md:py-8">
         {/* Desktop sidebar */}
-        <aside className="hidden w-[280px] shrink-0 md:block">
+        <aside className="hidden w-[300px] shrink-0 md:block">
           <div className="rounded-3xl border border-zinc-800/70 bg-zinc-900/30 p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.03)] backdrop-blur">
             <div className="flex items-center gap-3 px-2 py-2">
               <div className="grid h-10 w-10 place-items-center rounded-2xl border border-zinc-800/70 bg-zinc-950/40">
-                <span className="text-xs font-semibold text-zinc-200">VT</span>
+                <span className="text-xs font-semibold text-zinc-200">OPS</span>
               </div>
               <div>
-                <div className="text-sm font-semibold">Van Wiring Tracker</div>
+                <div className="text-sm font-semibold">Van Build Ops</div>
                 <div className="text-xs text-zinc-400">Offline + auto-save</div>
               </div>
             </div>
@@ -107,14 +158,44 @@ export default function App() {
             </div>
 
             <div className="mt-4 grid grid-cols-2 gap-2">
-              <Pill label={`Total ${wiringStats.total}`} tone="neutral" />
+              <Pill label={`Runs ${wiringStats.total}`} tone="neutral" />
               <Pill label={`Done ${wiringStats.done}`} tone="good" />
               <Pill label={`Needs ${wiringStats.needs}`} tone="warn" />
               <Pill label={`TBD ${wiringStats.tbd}`} tone="muted" />
+              <Pill label={`Issues ${wiringStats.issues}`} tone="warn" />
+              <div />
             </div>
 
-            <div className="mt-4 text-xs text-zinc-400">
-              Tip: build runs + parts here, then export JSON for backups.
+            <div className="mt-4 flex flex-col gap-2">
+              <button
+                onClick={exportBackup}
+                className="rounded-2xl border border-zinc-800/70 bg-zinc-950/40 px-4 py-2 text-sm hover:bg-zinc-900/60"
+              >
+                Export Backup (JSON)
+              </button>
+              <button
+                onClick={() => importRef.current?.click()}
+                className="rounded-2xl border border-zinc-800/70 bg-zinc-950/40 px-4 py-2 text-sm hover:bg-zinc-900/60"
+              >
+                Import Backup (JSON)
+              </button>
+              <button
+                onClick={resetAll}
+                className="rounded-2xl border border-red-900/60 bg-red-950/30 px-4 py-2 text-sm hover:bg-red-950/60"
+              >
+                Reset Entire App
+              </button>
+              <input
+                ref={importRef}
+                type="file"
+                accept="application/json"
+                className="hidden"
+                onChange={onImportBackupFile}
+              />
+            </div>
+
+            <div className="mt-3 text-xs text-zinc-400">
+              Tip: Export daily backups to your hard drive.
             </div>
           </div>
         </aside>
@@ -129,15 +210,22 @@ export default function App() {
                   <h1 className="text-2xl font-semibold tracking-tight">
                     {current?.label}
                   </h1>
-                  <p className="mt-1 text-sm text-zinc-300">
-                    {current?.sub}
-                  </p>
+                  <p className="mt-1 text-sm text-zinc-300">{current?.sub}</p>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  <Pill label={`Total ${wiringStats.total}`} tone="neutral" />
-                  <Pill label={`Done ${wiringStats.done}`} tone="good" />
-                  <Pill label={`Needs confirm ${wiringStats.needs}`} tone="warn" />
-                  <Pill label={`TBD ${wiringStats.tbd}`} tone="muted" />
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={exportBackup}
+                    className="rounded-2xl border border-zinc-800/70 bg-zinc-950/40 px-4 py-2 text-sm hover:bg-zinc-900/60"
+                  >
+                    Export Backup
+                  </button>
+                  <button
+                    onClick={() => importRef.current?.click()}
+                    className="rounded-2xl border border-zinc-800/70 bg-zinc-950/40 px-4 py-2 text-sm hover:bg-zinc-900/60"
+                  >
+                    Import Backup
+                  </button>
                 </div>
               </div>
             </div>
@@ -145,15 +233,43 @@ export default function App() {
 
           {/* Content card */}
           <div className="mt-4 rounded-3xl border border-zinc-800/70 bg-zinc-900/20 p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.03)] backdrop-blur md:p-6">
-            {active === "wiring" ? (
-              <WiringRunsTable rows={wiringRuns} setRows={setWiringRuns} />
-            ) : (
-              <PartsInventoryTable parts={parts} setParts={setParts} />
+            {active === "wiring" && (
+              <WiringRunsTable
+                rows={ops.wiringRuns}
+                setRows={(next) => setOps((o) => ({ ...o, wiringRuns: next }))}
+              />
+            )}
+
+            {active === "parts" && (
+              <PartsInventoryTable
+                parts={ops.parts}
+                setParts={(next) => setOps((o) => ({ ...o, parts: next }))}
+              />
+            )}
+
+            {active === "guides" && (
+              <Guides
+                guidesById={ops.guidesById}
+                guideTree={ops.guideTree}
+                setGuidesById={(next) =>
+                  setOps((o) => ({ ...o, guidesById: next }))
+                }
+                setGuideTree={(next) =>
+                  setOps((o) => ({ ...o, guideTree: next }))
+                }
+              />
+            )}
+
+            {active === "phases" && (
+              <Phases
+                phases={ops.phases}
+                setPhases={(next) => setOps((o) => ({ ...o, phases: next }))}
+              />
             )}
           </div>
 
           <div className="mt-4 text-xs text-zinc-400">
-            Mobile-friendly by design: sidebar becomes a menu on phone.
+            Phone-first UI: sidebar becomes a menu on mobile.
           </div>
         </main>
       </div>
@@ -168,7 +284,7 @@ export default function App() {
           <div className="absolute left-0 top-0 h-full w-[86%] max-w-sm border-r border-zinc-800/70 bg-zinc-950/90 backdrop-blur">
             <div className="flex items-center justify-between px-4 py-4">
               <div>
-                <div className="text-sm font-semibold">Van Wiring Tracker</div>
+                <div className="text-sm font-semibold">Van Build Ops</div>
                 <div className="text-xs text-zinc-400">Menu</div>
               </div>
               <button
@@ -179,7 +295,7 @@ export default function App() {
               </button>
             </div>
 
-            <div className="px-3">
+            <div className="px-3 space-y-2">
               {NAV.map((item) => (
                 <button
                   key={item.key}
@@ -199,12 +315,28 @@ export default function App() {
                 </button>
               ))}
 
-              <div className="mt-4 grid grid-cols-2 gap-2">
-                <Pill label={`Total ${wiringStats.total}`} tone="neutral" />
-                <Pill label={`Done ${wiringStats.done}`} tone="good" />
-                <Pill label={`Needs ${wiringStats.needs}`} tone="warn" />
-                <Pill label={`TBD ${wiringStats.tbd}`} tone="muted" />
+              <div className="pt-3 space-y-2">
+                <button
+                  onClick={exportBackup}
+                  className="w-full rounded-2xl border border-zinc-800/70 bg-zinc-950/40 px-4 py-2 text-sm hover:bg-zinc-900/60"
+                >
+                  Export Backup
+                </button>
+                <button
+                  onClick={() => importRef.current?.click()}
+                  className="w-full rounded-2xl border border-zinc-800/70 bg-zinc-950/40 px-4 py-2 text-sm hover:bg-zinc-900/60"
+                >
+                  Import Backup
+                </button>
               </div>
+
+              <input
+                ref={importRef}
+                type="file"
+                accept="application/json"
+                className="hidden"
+                onChange={onImportBackupFile}
+              />
             </div>
           </div>
         </div>
