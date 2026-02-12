@@ -236,14 +236,33 @@ export default function App() {
             {active === "wiring" && (
               <WiringRunsTable
                 rows={ops.wiringRuns}
-                setRows={(next) => setOps((o) => ({ ...o, wiringRuns: next }))}
+                setRows={(updater) =>
+                  setOps((o) => {
+                    const prev = Array.isArray(o.wiringRuns)
+                      ? o.wiringRuns
+                      : [];
+                    const next =
+                      typeof updater === "function" ? updater(prev) : updater;
+                    return {
+                      ...o,
+                      wiringRuns: Array.isArray(next) ? next : prev,
+                    };
+                  })
+                }
               />
             )}
 
             {active === "parts" && (
               <PartsInventoryTable
                 parts={ops.parts}
-                setParts={(next) => setOps((o) => ({ ...o, parts: next }))}
+                setParts={(updater) =>
+                  setOps((o) => {
+                    const prev = Array.isArray(o.parts) ? o.parts : [];
+                    const next =
+                      typeof updater === "function" ? updater(prev) : updater;
+                    return { ...o, parts: Array.isArray(next) ? next : prev };
+                  })
+                }
               />
             )}
 
@@ -251,19 +270,59 @@ export default function App() {
               <Guides
                 guidesById={ops.guidesById}
                 guideTree={ops.guideTree}
-                setGuidesById={(next) =>
-                  setOps((o) => ({ ...o, guidesById: next }))
+                setGuidesById={(updater) =>
+                  setOps((o) => {
+                    const prev =
+                      o.guidesById &&
+                      typeof o.guidesById === "object" &&
+                      !Array.isArray(o.guidesById)
+                        ? o.guidesById
+                        : {};
+                    const next =
+                      typeof updater === "function" ? updater(prev) : updater;
+                    const safeNext =
+                      next && typeof next === "object" && !Array.isArray(next)
+                        ? next
+                        : prev;
+                    return { ...o, guidesById: safeNext };
+                  })
                 }
-                setGuideTree={(next) =>
-                  setOps((o) => ({ ...o, guideTree: next }))
+                setGuideTree={(updater) =>
+                  setOps((o) => {
+                    const prev = Array.isArray(o.guideTree) ? o.guideTree : [];
+                    const next =
+                      typeof updater === "function" ? updater(prev) : updater;
+                    return {
+                      ...o,
+                      guideTree: Array.isArray(next) ? next : prev,
+                    };
+                  })
                 }
               />
             )}
 
+            {/* 
             {active === "phases" && (
               <Phases
                 phases={ops.phases}
                 setPhases={(next) => setOps((o) => ({ ...o, phases: next }))}
+              />
+            )} */}
+            {active === "phases" && (
+              <Phases
+                phases={ops.phases}
+                setPhases={(updater) =>
+                  setOps((o) => {
+                    const prev = Array.isArray(o.phases) ? o.phases : [];
+                    const next =
+                      typeof updater === "function" ? updater(prev) : updater;
+
+                    return {
+                      ...o,
+                      phases: Array.isArray(next) ? next : prev, // never allow corruption
+                    };
+                  })
+                }
               />
             )}
           </div>

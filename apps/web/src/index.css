@@ -131,10 +131,14 @@ body::before {
   cursor: crosshair;
 } */
 
-button, a, [role="button"] {
+button,
+a,
+[role="button"] {
   cursor: pointer;
 }
 
-input, textarea, select {
+input,
+textarea,
+select {
   cursor: text;
 }
