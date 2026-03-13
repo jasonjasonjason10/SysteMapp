@@ -779,6 +779,7 @@ export default function App() {
             {active === "wiring" && (
               <WiringRunsTable
                 rows={ops.wiringRuns}
+                fuses={ops.fuses}
                 setRows={(updater) =>
                   setOps((o) => {
                     const prev = Array.isArray(o.wiringRuns)

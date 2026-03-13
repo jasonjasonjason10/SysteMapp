@@ -57,7 +57,7 @@
 //   return true;
 // }
 
-export const LS_KEY = "van-build-ops:v1";
+export const LS_KEY = "van-build-ops:v2";
 
 export const EMPTY_STATE = {
   wiringRuns: [],
